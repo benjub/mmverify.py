@@ -551,12 +551,19 @@ class MM:
         """Return the proof stack once the given compressed proof for an
         assertion with the given $f and $e-hypotheses has been processed.
         """
+        active_hypotheses = {label for frame in self.fs for labels in (frame.f_labels, frame.e_labels) for label in labels.values()}
         # Preprocessing and building the lists of proof_ints and labels
         flabels = [self.fs.lookup_f(v) for _, v in f_hyps]
         elabels = [self.fs.lookup_e(s) for s in e_hyps]
         plabels = flabels + elabels  # labels of implicit hypotheses
         idx_bloc = proof.index(')')  # index of end of label bloc
-        plabels += proof[1:idx_bloc]  # labels which will be referenced later
+        label_list = proof[1:idx_bloc]
+        def authorized(label):
+            return label in active_hypotheses or is_assertion(self.labels.get(label))
+        if not all(authorized(label) for label in label_list):
+            unauthorized = ','.join(label for label in label_list if not authorized(label))
+            raise MMError(f"Label list in compressed proof contains unauthorized labels: {unauthorized}")
+        plabels += label_list  # labels which will be referenced later
         compressed_proof = ''.join(proof[idx_bloc + 1:])
         vprint(5, 'Referenced labels:', plabels)
         label_end = len(plabels)
