@@ -120,22 +120,46 @@ class Toks:
         vprint(90, "Token:", tok)
         return tok
 
-    def readf(self) -> StringOption:
-        """Read the next token once included files have been expanded.  In the
-        latter case, the path/name of the expanded file is added to the set of
-        imported files so as to avoid multiple imports.
+
+    def readc(self) -> StringOption:
+        """Read the next token once comments have been skipped.
         """
         tok = self.read()
+        while tok == '$(':
+            tok = self.read()
+            while tok and tok != '$)':
+                if '$(' in tok or '$)' in tok:
+                    raise MMError(
+                        f"Encountered token {tok} while reading a comment. " +
+                         "Comment contents should not contain '$(' nor " +
+                         "'$)' as a substring.  In particular, comments " +
+                         "should not nest.")
+                tok = self.read()
+            if not tok:
+                raise MMError("Unclosed comment at end of file.")
+            assert tok == '$)'
+            tok = self.read()
+        vprint(80, "Token once comments skipped:", tok)
+        return tok
+
+
+    def readcf(self) -> StringOption:
+        """Read the next token once comments have been skipped and included
+        files have been expanded.  In the latter case, the path/name of the
+        expanded file is added to the set of imported files so as to avoid
+        multiple imports.
+        """
+        tok = self.readc()
         while tok == '$[':
-            filename = self.read()
+            filename = self.readc()
             if not filename:
                 raise MMError(
                     "Unclosed inclusion statement at end of file.")
-            endbracket = self.read()
+            endbracket = self.readc()
             if endbracket != '$]':
                 raise MMError(
-                    ("Inclusion statement for file {} not " +
-                     "closed with a '$]'.").format(filename))
+                    f"Inclusion statement for file {filename} not " +
+                     "closed with a '$]'.")
             file = pathlib.Path(filename).resolve()
             if file not in self.imported_files:
                 # wrap the rest of the line after the inclusion command in a
@@ -149,36 +173,8 @@ class Toks:
                 self.files_buf.append(open(file, mode='r', encoding='ascii'))
                 self.imported_files.add(file)
                 vprint(5, 'Importing file:', filename)
-            tok = self.read()
-        vprint(80, "Token once included files expanded:", tok)
-        return tok
-
-    def readc(self) -> StringOption:
-        """Read the next token once included files have been expanded and
-        comments have been skipped.
-        """
-        tok = self.readf()
-        while tok == '$(':
-            # Note that we use 'read' in this while-loop, and not 'readf',
-            # since inclusion statements within a comment are still comments
-            # so should be skipped.
-            # The following line is not necessary but makes things clearer;
-            # note the similarity with the first three lines of 'readf'.
-            tok = self.read()
-            while tok and tok != '$)':
-                if '$(' in tok or '$)' in tok:
-                    raise MMError(
-                        ("Encountered token '{}' while reading a comment. " +
-                         "Comment contents should not contain '$(' nor " +
-                         "'$)' as a substring.  In particular, comments " +
-                         "should not nest.").format(tok))
-                tok = self.read()
-            if not tok:
-                raise MMError("Unclosed comment at end of file.")
-            assert tok == '$)'
-            # 'readf' since an inclusion may follow a comment immediately
-            tok = self.readf()
-        vprint(70, "Token once comments skipped:", tok)
+            tok = self.readc()
+        vprint(70, "Token once comments skipped and included files expanded:", tok)
         return tok
 
 
@@ -359,7 +355,7 @@ class MM:
         (typically "$=" or "$.").
         """
         stmt = []
-        tok = toks.readc()
+        tok = toks.readcf()
         while tok and tok != end_token:
             is_active_var = self.fs.lookup_v(tok)
             if stmttype in {'$d', '$e', '$a', '$p'} and not (
@@ -373,7 +369,7 @@ class MM:
                 raise MMError(("Variable {} in {}-statement is not typed " +
                                "by an active $f-statement).").format(tok, stmttype))
             stmt.append(tok)
-            tok = toks.readc()
+            tok = toks.readcf()
         if not tok:
             raise MMError(
                 "Unclosed {}-statement at end of file.".format(stmttype))
@@ -403,7 +399,7 @@ class MM:
         """
         self.fs.push()
         label = None
-        tok = toks.readc()
+        tok = toks.readcf()
         while tok and tok != '$}':
             if tok == '$c':
                 for tok in self.read_non_p_stmt(tok, toks):
@@ -466,7 +462,7 @@ class MM:
                     self.verify_proofs = True
             else:
                 raise MMError("Unknown token: '{}'.".format(tok))
-            tok = toks.readc()
+            tok = toks.readcf()
         self.fs.pop()
 
     def treat_step(self,
